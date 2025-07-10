@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - Travel Planner</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<h1>Login</h1>
+<form id="loginForm">
+    <div>
+        <label for="username">Username:</label>
+        <input type="text" id="username" name="username" required>
+    </div>
+    <div>
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required>
+    </div>
+    <button type="submit">Login</button>
+</form>
+<div id="result"></div>
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password})
+            });
+            const data = await response.json();
+            document.getElementById('result').innerHTML =
+                '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+
+            if (data.token) {
+                localStorage.setItem('jwt_token', data.token);
+                alert('Login successful! Token saved.');
+            }
+        } catch (error) {
+            document.getElementById('result').innerHTML = 'Error: ' + error.message;
+        }
+    });
+</script>
+</body>
+</html>

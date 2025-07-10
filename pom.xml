@@ -12,7 +12,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <vertx.version>4.5.1</vertx.version> <!-- Updated Vert.x version -->
+        <vertx.version>4.5.1</vertx.version>
         <junit.version>5.9.2</junit.version>
     </properties>
 
@@ -38,21 +38,21 @@
             <version>${vertx.version}</version>
         </dependency>
 
-        <!-- JWT Support -->
+        <!-- Vert.x Auth JWT -->
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-auth-jwt</artifactId>
+            <version>4.5.1</version>
+        </dependency>
+
+        <!-- Vert.x Auth Common (for HashingStrategy) -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-auth-common</artifactId>
             <version>${vertx.version}</version>
         </dependency>
 
-        <!-- Password Hashing -->
-        <dependency>
-            <groupId>org.mindrot</groupId>
-            <artifactId>jbcrypt</artifactId>
-            <version>0.4</version>
-        </dependency>
-
-        <!-- JSON Processing -->
+        <!-- JSON Processing (optional, in case you use Jackson elsewhere) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -66,7 +66,14 @@
             <version>1.4.11</version>
         </dependency>
 
-        <!-- Test Dependencies -->
+        <!-- Vert.x Web Template Support (optional if you use HTML rendering) -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-web-templ-thymeleaf</artifactId>
+            <version>${vertx.version}</version>
+        </dependency>
+
+        <!-- Testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -80,11 +87,13 @@
             <version>${vertx.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Password Hashing using BCrypt -->
         <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-web-templ-thymeleaf</artifactId>
-            <version>5.0.1</version>
+            <groupId>org.mindrot</groupId>
+            <artifactId>jbcrypt</artifactId>
+            <version>0.4</version>
         </dependency>
+
     </dependencies>
 
     <build>
@@ -117,7 +126,6 @@
                 </configuration>
             </plugin>
 
-            <!-- Optional: Add the maven-jar-plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>

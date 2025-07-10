@@ -1,0 +1,4 @@
+{
+  "httpPort": 8888,
+  "jwtSecret": "supersecretkey"
+}

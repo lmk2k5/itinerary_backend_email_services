@@ -1,10 +1,11 @@
 package com.itinerary;
 
+import com.itinerary.handlers.AuthHandler;
+import com.itinerary.handlers.TripHandler;
+import com.itinerary.handlers.WebHandler;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
-import io.vertx.core.http.HttpServer;
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.auth.PubSecKeyOptions;
 import io.vertx.ext.auth.jwt.JWTAuth;
 import io.vertx.ext.auth.jwt.JWTAuthOptions;
 import io.vertx.ext.mongo.MongoClient;
@@ -13,107 +14,72 @@ import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.CorsHandler;
 import io.vertx.ext.web.handler.JWTAuthHandler;
 import io.vertx.ext.web.handler.StaticHandler;
-import io.vertx.ext.web.templ.thymeleaf.ThymeleafTemplateEngine;
-import com.itinerary.handlers.AuthHandler;
-import com.itinerary.handlers.TripHandler;
-import com.itinerary.handlers.WebHandler;
+
+import java.util.HashSet;
+import java.util.Set;
 
 public class MainVerticle extends AbstractVerticle {
 
-    private MongoClient mongoClient;
-    private JWTAuth jwtAuth;
-    private ThymeleafTemplateEngine templateEngine;
-
     @Override
-    public void start(Promise<Void> startPromise) throws Exception {
-        // MongoDB configuration
+    public void start(Promise<Void> startPromise) {
         JsonObject mongoConfig = new JsonObject()
                 .put("connection_string", "mongodb://localhost:27017")
-                .put("db_name", "travel_planner");
+                .put("db_name", "itinerary_app");
 
-        mongoClient = MongoClient.createShared(vertx, mongoConfig);
+        MongoClient mongoClient = MongoClient.createShared(vertx, mongoConfig);
 
-        // JWT configuration
-        JWTAuthOptions jwtConfig = new JWTAuthOptions()
-                .addPubSecKey(new PubSecKeyOptions()
-                        .setAlgorithm("HS256")
-                        .setBuffer("your-secret-key-change-this-in-production"));
+        // Simplified JWT configuration for Vert.x 4.5.1
+        JWTAuthOptions jwtOptions = new JWTAuthOptions()
+                .addJwk(new JsonObject()
+                        .put("kty", "oct")
+                        .put("k", "c3VwZXJzZWNyZXRrZXk=")); // Base64 encoded "supersecretkey"
 
-        jwtAuth = JWTAuth.create(vertx, jwtConfig);
+        JWTAuth jwtAuth = JWTAuth.create(vertx, jwtOptions);
 
-        // Template engine
-        templateEngine = ThymeleafTemplateEngine.create(vertx);
-
-        // Create HTTP server
-        HttpServer server = vertx.createHttpServer();
-
-        // Create router
         Router router = Router.router(vertx);
 
         // Enable CORS
-        router.route().handler(CorsHandler.create("*")
-                .allowedMethod(io.vertx.core.http.HttpMethod.GET)
-                .allowedMethod(io.vertx.core.http.HttpMethod.POST)
-                .allowedMethod(io.vertx.core.http.HttpMethod.PUT)
-                .allowedMethod(io.vertx.core.http.HttpMethod.DELETE)
-                .allowedHeader("Content-Type")
-                .allowedHeader("Authorization"));
+        Set<String> allowedHeaders = new HashSet<>();
+        allowedHeaders.add("Content-Type");
+        allowedHeaders.add("Authorization");
 
-        // Enable body parsing
+        router.route().handler(CorsHandler.create("*").allowedHeaders(allowedHeaders));
         router.route().handler(BodyHandler.create());
 
-        // Static files (CSS, JS, images)
-        router.route("/static/*").handler(StaticHandler.create("static"));
-
-        // Initialize handlers
         AuthHandler authHandler = new AuthHandler(mongoClient, jwtAuth);
         TripHandler tripHandler = new TripHandler(mongoClient);
-        WebHandler webHandler = new WebHandler(mongoClient, jwtAuth, templateEngine);
+        WebHandler webHandler = new WebHandler(vertx); // Fixed: passing vertx parameter
 
-        // Web routes (HTML pages)
-        router.get("/").handler(webHandler::home);
-        router.get("/login").handler(webHandler::loginPage);
-        router.get("/signup").handler(webHandler::signupPage);
-        router.get("/dashboard").handler(webHandler::dashboardPage);
-        router.get("/trip/:tripId").handler(webHandler::tripPage);
-        router.get("/create-trip").handler(webHandler::createTripPage);
+        // Auth routes
+        router.post("/auth/signup").handler(authHandler::signup);
+        router.post("/auth/login").handler(authHandler::login);
 
-        // API routes for AJAX calls
-        router.post("/api/signup").handler(authHandler::signup);
-        router.post("/api/login").handler(authHandler::login);
+        // Static test pages
+        router.get("/test-login").handler(webHandler::serveLoginPage);
+        router.get("/test-signup").handler(webHandler::serveSignupPage);
+        router.get("/test-dashboard").handler(webHandler::serveDashboardPage);
 
-        // Protected API routes
-        router.route("/api/trips*").handler(JWTAuthHandler.create(jwtAuth));
+        // Static resources
+        router.route("/css/*").handler(StaticHandler.create("webroot"));
+        router.route("/js/*").handler(StaticHandler.create("webroot"));
+
+        // Secure API
+        router.route("/api/*").handler(JWTAuthHandler.create(jwtAuth));
+
+        // Trip routes
+        router.get("/api/dashboard").handler(tripHandler::getAllTrips);
         router.post("/api/trips").handler(tripHandler::createTrip);
-        router.put("/api/trips/:tripId").handler(tripHandler::updateTrip);
         router.delete("/api/trips/:tripId").handler(tripHandler::deleteTrip);
         router.post("/api/trips/:tripId/days").handler(tripHandler::addDay);
-        router.put("/api/trips/:tripId/days/:dayNumber").handler(tripHandler::updateDay);
         router.delete("/api/trips/:tripId/days/:dayNumber").handler(tripHandler::deleteDay);
-        router.get("/api/dashboard").handler(tripHandler::getAllTrips);
 
-        // Health check endpoint
-        router.get("/health").handler(ctx -> {
-            ctx.response()
-                    .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("status", "healthy").encode());
-        });
-
-        // Start the server
-        server.requestHandler(router).listen(8888, result -> {
-            if (result.succeeded()) {
-                System.out.println("Travel Itinerary Planner started on http://localhost:8888");
-                startPromise.complete();
-            } else {
-                startPromise.fail(result.cause());
-            }
-        });
-    }
-
-    @Override
-    public void stop() throws Exception {
-        if (mongoClient != null) {
-            mongoClient.close();
-        }
+        vertx.createHttpServer()
+                .requestHandler(router)
+                .listen(8888)
+                .onSuccess(server -> {
+                    System.out.println("HTTP server started on port " + server.actualPort());
+                    startPromise.complete();
+                })
+                .onFailure(startPromise::fail);
     }
 }

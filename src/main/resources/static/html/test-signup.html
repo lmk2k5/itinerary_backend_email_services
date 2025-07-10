@@ -1,0 +1,82 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Signup - Travel Planner</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<h1>Sign Up</h1>
+<form id="signupForm">
+    <div>
+        <label for="username">Username:</label>
+        <input type="text" id="username" name="username" required>
+    </div>
+    <div>
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required>
+    </div>
+    <div>
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required>
+    </div>
+    <div>
+        <label for="confirmPassword">Confirm Password:</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" required>
+    </div>
+    <button type="submit">Sign Up</button>
+</form>
+<div id="result"></div>
+<div>
+    <p>Already have an account? <a href="/test-login">Login here</a></p>
+</div>
+<script>
+    document.getElementById('signupForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+
+        // Basic validation
+        if (password !== confirmPassword) {
+            document.getElementById('result').innerHTML =
+                '<div style="color: red;">Passwords do not match!</div>';
+            return;
+        }
+
+        if (password.length < 6) {
+            document.getElementById('result').innerHTML =
+                '<div style="color: red;">Password must be at least 6 characters long!</div>';
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/signup', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, email, password})
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                document.getElementById('result').innerHTML =
+                    '<div style="color: green;">Account created successfully!</div>' +
+                    '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+
+                // Auto-redirect to login after 2 seconds
+                setTimeout(() => {
+                    window.location.href = '/test-login';
+                }, 2000);
+            } else {
+                document.getElementById('result').innerHTML =
+                    '<div style="color: red;">Error: ' + (data.message || 'Signup failed') + '</div>';
+            }
+        } catch (error) {
+            document.getElementById('result').innerHTML =
+                '<div style="color: red;">Error: ' + error.message + '</div>';
+        }
+    });
+</script>
+</body>
+</html>

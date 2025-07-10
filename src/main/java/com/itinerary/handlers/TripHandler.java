@@ -5,8 +5,6 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.MongoClient;
 import io.vertx.ext.web.RoutingContext;
 
-import java.util.List;
-
 public class TripHandler {
 
     private final MongoClient mongoClient;
@@ -17,6 +15,9 @@ public class TripHandler {
     }
 
     private String getUserIdFromToken(RoutingContext ctx) {
+        if (ctx.user() == null || ctx.user().principal() == null) {
+            throw new RuntimeException("Unauthorized: No user in context");
+        }
         return ctx.user().principal().getString("sub");
     }
 
@@ -28,19 +29,14 @@ public class TripHandler {
             if (result.succeeded()) {
                 JsonArray trips = new JsonArray(result.result());
                 ctx.response()
-                        .setStatusCode(200)
                         .putHeader("content-type", "application/json")
                         .end(new JsonObject()
                                 .put("trips", trips)
-                                .put("count", trips.size())
                                 .encode());
             } else {
                 ctx.response()
                         .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to retrieve trips")
-                                .encode());
+                        .end(new JsonObject().put("error", "Failed to retrieve trips").encode());
             }
         });
     }
@@ -50,12 +46,7 @@ public class TripHandler {
         JsonObject body = ctx.getBodyAsJson();
 
         if (body == null || !body.containsKey("tripName")) {
-            ctx.response()
-                    .setStatusCode(400)
-                    .putHeader("content-type", "application/json")
-                    .end(new JsonObject()
-                            .put("error", "Trip name is required")
-                            .encode());
+            ctx.response().setStatusCode(400).end(new JsonObject().put("error", "Trip name is required").encode());
             return;
         }
 
@@ -67,76 +58,15 @@ public class TripHandler {
                 .put("createdAt", System.currentTimeMillis())
                 .put("updatedAt", System.currentTimeMillis());
 
-        mongoClient.insert(TRIPS_COLLECTION, newTrip, result -> {
-            if (result.succeeded()) {
-                newTrip.put("_id", result.result());
+        mongoClient.insert(TRIPS_COLLECTION, newTrip, res -> {
+            if (res.succeeded()) {
+                newTrip.put("_id", res.result());
                 ctx.response()
                         .setStatusCode(201)
                         .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("message", "Trip created successfully")
-                                .put("trip", newTrip)
-                                .encode());
+                        .end(new JsonObject().put("trip", newTrip).encode());
             } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to create trip")
-                                .encode());
-            }
-        });
-    }
-
-    public void updateTrip(RoutingContext ctx) {
-        String userId = getUserIdFromToken(ctx);
-        String tripId = ctx.pathParam("tripId");
-        JsonObject body = ctx.getBodyAsJson();
-
-        if (body == null) {
-            ctx.response()
-                    .setStatusCode(400)
-                    .putHeader("content-type", "application/json")
-                    .end(new JsonObject()
-                            .put("error", "Request body is required")
-                            .encode());
-            return;
-        }
-
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId);
-
-        JsonObject update = new JsonObject()
-                .put("$set", new JsonObject()
-                        .put("tripName", body.getString("tripName"))
-                        .put("description", body.getString("description", ""))
-                        .put("updatedAt", System.currentTimeMillis()));
-
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, result -> {
-            if (result.succeeded()) {
-                if (result.result().getDocMatched() > 0) {
-                    ctx.response()
-                            .setStatusCode(200)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("message", "Trip updated successfully")
-                                    .encode());
-                } else {
-                    ctx.response()
-                            .setStatusCode(404)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("error", "Trip not found")
-                                    .encode());
-                }
-            } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to update trip")
-                                .encode());
+                ctx.response().setStatusCode(500).end(new JsonObject().put("error", "Failed to create trip").encode());
             }
         });
     }
@@ -145,34 +75,13 @@ public class TripHandler {
         String userId = getUserIdFromToken(ctx);
         String tripId = ctx.pathParam("tripId");
 
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId);
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
 
-        mongoClient.removeDocument(TRIPS_COLLECTION, query, result -> {
-            if (result.succeeded()) {
-                if (result.result().getRemovedCount() > 0) {
-                    ctx.response()
-                            .setStatusCode(200)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("message", "Trip deleted successfully")
-                                    .encode());
-                } else {
-                    ctx.response()
-                            .setStatusCode(404)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("error", "Trip not found")
-                                    .encode());
-                }
+        mongoClient.removeDocument(TRIPS_COLLECTION, query, res -> {
+            if (res.succeeded() && res.result().getRemovedCount() > 0) {
+                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Trip deleted").encode());
             } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to delete trip")
-                                .encode());
+                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip not found").encode());
             }
         });
     }
@@ -182,109 +91,30 @@ public class TripHandler {
         String tripId = ctx.pathParam("tripId");
         JsonObject body = ctx.getBodyAsJson();
 
-        if (body == null || !body.containsKey("dayNumber")) {
-            ctx.response()
-                    .setStatusCode(400)
-                    .putHeader("content-type", "application/json")
-                    .end(new JsonObject()
-                            .put("error", "Day number is required")
-                            .encode());
+        if (body == null || !body.containsKey("dayNumber") || !body.containsKey("date")
+                || !body.containsKey("time") || !body.containsKey("activity")) {
+            ctx.response().setStatusCode(400)
+                    .end(new JsonObject().put("error", "dayNumber, date, time, and activity are required").encode());
             return;
         }
 
         JsonObject newDay = new JsonObject()
                 .put("dayNumber", body.getInteger("dayNumber"))
-                .put("date", body.getString("date", ""))
-                .put("places", body.getJsonArray("places", new JsonArray()));
+                .put("date", body.getString("date"))
+                .put("time", body.getString("time"))
+                .put("activity", body.getString("activity"));
 
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId);
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
 
         JsonObject update = new JsonObject()
                 .put("$push", new JsonObject().put("days", newDay))
                 .put("$set", new JsonObject().put("updatedAt", System.currentTimeMillis()));
 
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, result -> {
-            if (result.succeeded()) {
-                if (result.result().getDocMatched() > 0) {
-                    ctx.response()
-                            .setStatusCode(200)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("message", "Day added successfully")
-                                    .put("day", newDay)
-                                    .encode());
-                } else {
-                    ctx.response()
-                            .setStatusCode(404)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("error", "Trip not found")
-                                    .encode());
-                }
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Day added").encode());
             } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to add day")
-                                .encode());
-            }
-        });
-    }
-
-    public void updateDay(RoutingContext ctx) {
-        String userId = getUserIdFromToken(ctx);
-        String tripId = ctx.pathParam("tripId");
-        String dayNumber = ctx.pathParam("dayNumber");
-        JsonObject body = ctx.getBodyAsJson();
-
-        if (body == null) {
-            ctx.response()
-                    .setStatusCode(400)
-                    .putHeader("content-type", "application/json")
-                    .end(new JsonObject()
-                            .put("error", "Request body is required")
-                            .encode());
-            return;
-        }
-
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId)
-                .put("days.dayNumber", Integer.parseInt(dayNumber));
-
-        JsonObject update = new JsonObject()
-                .put("$set", new JsonObject()
-                        .put("days.$.date", body.getString("date", ""))
-                        .put("days.$.places", body.getJsonArray("places", new JsonArray()))
-                        .put("updatedAt", System.currentTimeMillis()));
-
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, result -> {
-            if (result.succeeded()) {
-                if (result.result().getDocMatched() > 0) {
-                    ctx.response()
-                            .setStatusCode(200)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("message", "Day updated successfully")
-                                    .encode());
-                } else {
-                    ctx.response()
-                            .setStatusCode(404)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("error", "Trip or day not found")
-                                    .encode());
-                }
-            } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to update day")
-                                .encode());
+                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip not found").encode());
             }
         });
     }
@@ -292,42 +122,19 @@ public class TripHandler {
     public void deleteDay(RoutingContext ctx) {
         String userId = getUserIdFromToken(ctx);
         String tripId = ctx.pathParam("tripId");
-        String dayNumber = ctx.pathParam("dayNumber");
+        int dayNumber = Integer.parseInt(ctx.pathParam("dayNumber"));
 
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId);
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
 
         JsonObject update = new JsonObject()
-                .put("$pull", new JsonObject()
-                        .put("days", new JsonObject()
-                                .put("dayNumber", Integer.parseInt(dayNumber))))
+                .put("$pull", new JsonObject().put("days", new JsonObject().put("dayNumber", dayNumber)))
                 .put("$set", new JsonObject().put("updatedAt", System.currentTimeMillis()));
 
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, result -> {
-            if (result.succeeded()) {
-                if (result.result().getDocMatched() > 0) {
-                    ctx.response()
-                            .setStatusCode(200)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("message", "Day deleted successfully")
-                                    .encode());
-                } else {
-                    ctx.response()
-                            .setStatusCode(404)
-                            .putHeader("content-type", "application/json")
-                            .end(new JsonObject()
-                                    .put("error", "Trip not found")
-                                    .encode());
-                }
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Day deleted").encode());
             } else {
-                ctx.response()
-                        .setStatusCode(500)
-                        .putHeader("content-type", "application/json")
-                        .end(new JsonObject()
-                                .put("error", "Failed to delete day")
-                                .encode());
+                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip not found").encode());
             }
         });
     }
