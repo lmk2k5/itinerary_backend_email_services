@@ -1,4 +1,3 @@
-Sure! Here's an enhanced version of the documentation that’s more detailed, including everything we've discussed:
 
 ---
 
