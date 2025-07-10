@@ -388,4 +388,3 @@ The following routes serve static HTML pages, which can be used for testing or f
 
 ---
 
-This updated documentation provides a detailed guide for both the backend setup and how to interact with the API. It also includes the changes we discussed, like **data validation** for adding days and clear error handling for when places or activities are missing.
