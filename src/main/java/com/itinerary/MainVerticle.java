@@ -79,6 +79,8 @@ public class MainVerticle extends AbstractVerticle {
         router.post("/api/trips/:tripId/days").handler(tripHandler::addDay);
         router.delete("/api/trips/:tripId/days/:dayNumber").handler(tripHandler::deleteDay);
 
+        //delete activity
+        router.delete("/api/trips/:tripId/days/:dayNumber/activities/:activityName").handler(tripHandler::deleteActivity);
         vertx.createHttpServer()
                 .requestHandler(router)
                 .listen(8888)
