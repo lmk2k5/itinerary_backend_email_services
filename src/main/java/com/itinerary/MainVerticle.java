@@ -58,6 +58,12 @@ public class MainVerticle extends AbstractVerticle {
         router.get("/test-login").handler(webHandler::serveLoginPage);
         router.get("/test-signup").handler(webHandler::serveSignupPage);
         router.get("/test-dashboard").handler(webHandler::serveDashboardPage);
+        router.get("/health").handler(ctx -> {
+            ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end("{\"status\":\"UP\"}");
+        });
+
 
         // Static resources
         router.route("/css/*").handler(StaticHandler.create("webroot"));
