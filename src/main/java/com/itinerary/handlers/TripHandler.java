@@ -5,6 +5,16 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.MongoClient;
 import io.vertx.ext.web.RoutingContext;
 
+class ErrorResponse {
+    public static JsonObject create(int code, String message) {
+        return new JsonObject()
+                .put("error", true)
+                .put("code", code)
+                .put("message", message)
+                .put("timestamp", System.currentTimeMillis());
+    }
+}
+
 public class TripHandler {
 
     private final MongoClient mongoClient;
@@ -150,51 +160,64 @@ public class TripHandler {
         });
     }
 
+    public class ValidationUtils {
+        public static boolean isValidTripId(String tripId) {
+            return tripId != null && tripId.length() == 24; // MongoDB ObjectId length
+        }
 
-    public void deleteActivity(RoutingContext ctx) {
-        String userId = getUserIdFromToken(ctx);  // Extract the userId from the token
-        String tripId = ctx.pathParam("tripId");  // Get the tripId from the URL path
-        Integer dayNumber = Integer.valueOf(ctx.pathParam("dayNumber"));  // Get the dayNumber from the path
-        String activityToRemove = ctx.pathParam("activityName");  // Get the activity name to remove (from path param)
-
-        // Log the delete request
-        System.out.println("Deleting activity: " + activityToRemove + " from day " + dayNumber + " in trip " + tripId);
-
-        // Define the query to find the trip by tripId and userId
-        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
-
-        // Find the specific day and remove the activity from it
-        JsonObject update = new JsonObject()
-                .put("$pull", new JsonObject().put("days", new JsonObject()
-                        .put("dayNumber", dayNumber)
-                        .put("places", new JsonObject().put("activity", activityToRemove))));
-
-        // Perform the update in the database
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
-            if (res.succeeded() && res.result().getDocMatched() > 0) {
-                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Activity removed").encode());
-            } else {
-                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip or day not found").encode());
+        public static boolean isValidDayNumber(String dayNumber) {
+            try {
+                int day = Integer.parseInt(dayNumber);
+                return day > 0 && day <= 365; // Reasonable bounds
+            } catch (NumberFormatException e) {
+                return false;
             }
-        });
+        }
     }
 
-    public void deleteDay(RoutingContext ctx) {
+    public void deleteActivity(RoutingContext ctx) {
         String userId = getUserIdFromToken(ctx);
         String tripId = ctx.pathParam("tripId");
-        int dayNumber = Integer.parseInt(ctx.pathParam("dayNumber"));
 
-        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
+        if (!ValidationUtils.isValidDayNumber(ctx.pathParam("dayNumber"))) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        Integer dayNumber = Integer.valueOf(ctx.pathParam("dayNumber"));
+        String activityToRemove = ctx.pathParam("activityName");
+
+        JsonObject query = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId);
 
         JsonObject update = new JsonObject()
-                .put("$pull", new JsonObject().put("days", new JsonObject().put("dayNumber", dayNumber)))
-                .put("$set", new JsonObject().put("updatedAt", System.currentTimeMillis()));
+                .put("$pull", new JsonObject()
+                        .put("days.$.places", new JsonObject()
+                                .put("activity", activityToRemove)));
 
-        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
-            if (res.succeeded() && res.result().getDocMatched() > 0) {
-                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Day deleted").encode());
+        // First find the document to get array index
+        JsonObject findQuery = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId)
+                .put("days.dayNumber", dayNumber);
+
+        mongoClient.findOne(TRIPS_COLLECTION, findQuery, null, res -> {
+            if (res.succeeded() && res.result() != null) {
+                // Now update using positional operator
+                mongoClient.updateCollection(TRIPS_COLLECTION, findQuery, update, updateRes -> {
+                    if (updateRes.succeeded()) {
+                        ctx.response().setStatusCode(200)
+                                .end(new JsonObject().put("message", "Activity removed").encode());
+                    } else {
+                        ctx.response().setStatusCode(500)
+                                .end(ErrorResponse.create(500, "Failed to remove activity").encode());
+                    }
+                });
             } else {
-                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip not found").encode());
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip or day not found").encode());
             }
         });
     }
