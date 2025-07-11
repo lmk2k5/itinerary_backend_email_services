@@ -64,7 +64,6 @@ public class MainVerticle extends AbstractVerticle {
                     .end("{\"status\":\"UP\"}");
         });
 
-
         // Static resources
         router.route("/css/*").handler(StaticHandler.create("webroot"));
         router.route("/js/*").handler(StaticHandler.create("webroot"));
@@ -75,12 +74,23 @@ public class MainVerticle extends AbstractVerticle {
         // Trip routes
         router.get("/api/dashboard").handler(tripHandler::getAllTrips);
         router.post("/api/trips").handler(tripHandler::createTrip);
+        router.get("/api/trips/:tripId").handler(tripHandler::getTripById); // ADDED: Get specific trip
+        router.put("/api/trips/:tripId").handler(tripHandler::updateTrip);   // ADDED: Update trip
         router.delete("/api/trips/:tripId").handler(tripHandler::deleteTrip);
+
+        // Day routes
         router.post("/api/trips/:tripId/days").handler(tripHandler::addDay);
+        router.put("/api/trips/:tripId/days/:dayNumber").handler(tripHandler::updateDay);
         router.delete("/api/trips/:tripId/days/:dayNumber").handler(tripHandler::deleteDay);
 
-        //delete activity
+        // Activity routes
+        router.post("/api/trips/:tripId/days/:dayNumber/activities").handler(tripHandler::addActivity);
+        router.put("/api/trips/:tripId/days/:dayNumber/activities/:activityName").handler(tripHandler::updateActivity);
         router.delete("/api/trips/:tripId/days/:dayNumber/activities/:activityName").handler(tripHandler::deleteActivity);
+
+        // Reorder activities within a day
+        router.put("/api/trips/:tripId/days/:dayNumber/reorder").handler(tripHandler::reorderActivities);
+
         vertx.createHttpServer()
                 .requestHandler(router)
                 .listen(8888)
