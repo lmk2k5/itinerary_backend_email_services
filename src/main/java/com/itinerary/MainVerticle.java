@@ -99,5 +99,15 @@ public class MainVerticle extends AbstractVerticle {
                     startPromise.complete();
                 })
                 .onFailure(startPromise::fail);
+
+        // GET RID OF TS
+        router.get("/").handler(ctx -> {
+            ctx.response()
+                    .putHeader("content-type", "text/html")
+                    .sendFile("webroot/index.html");
+        });
+
+        // Serve static files
+        router.route("/static/*").handler(StaticHandler.create("webroot/static"));
     }
 }
