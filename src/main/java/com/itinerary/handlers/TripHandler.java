@@ -185,6 +185,312 @@ public class TripHandler {
             }
         });
     }
+    //Update options
+    public void updateTrip(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        JsonObject body = ctx.getBodyAsJson();
+
+        if (!ValidationUtils.isValidTripId(tripId)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid trip ID").encode());
+            return;
+        }
+
+        if (body == null || (!body.containsKey("tripName") && !body.containsKey("description"))) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "At least tripName or description is required").encode());
+            return;
+        }
+
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
+        JsonObject updateFields = new JsonObject().put("updatedAt", System.currentTimeMillis());
+
+        if (body.containsKey("tripName")) {
+            updateFields.put("tripName", body.getString("tripName"));
+        }
+        if (body.containsKey("description")) {
+            updateFields.put("description", body.getString("description"));
+        }
+
+        JsonObject update = new JsonObject().put("$set", updateFields);
+
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                ctx.response().setStatusCode(200)
+                        .end(new JsonObject().put("message", "Trip updated successfully").encode());
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip not found").encode());
+            }
+        });
+    }
+
+    public void updateDay(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
+        JsonObject body = ctx.getBodyAsJson();
+
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        if (body == null || !body.containsKey("date")) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Date is required").encode());
+            return;
+        }
+
+        int dayNumber = Integer.parseInt(dayNumberStr);
+
+        JsonObject query = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId)
+                .put("days.dayNumber", dayNumber);
+
+        JsonObject update = new JsonObject()
+                .put("$set", new JsonObject()
+                        .put("days.$.date", body.getString("date"))
+                        .put("updatedAt", System.currentTimeMillis()));
+
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                if (res.result().getDocModified() > 0) {
+                    ctx.response().setStatusCode(200)
+                            .end(new JsonObject().put("message", "Day updated successfully").encode());
+                } else {
+                    ctx.response().setStatusCode(404)
+                            .end(ErrorResponse.create(404, "Day not found").encode());
+                }
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip or day not found").encode());
+            }
+        });
+    }
+
+    public void addActivity(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
+        JsonObject body = ctx.getBodyAsJson();
+
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        if (body == null || !body.containsKey("activity") || !body.containsKey("time")) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Activity and time are required").encode());
+            return;
+        }
+
+        int dayNumber = Integer.parseInt(dayNumberStr);
+
+        JsonObject newActivity = new JsonObject()
+                .put("activity", body.getString("activity"))
+                .put("time", body.getString("time"));
+
+        // Add optional fields if present
+        if (body.containsKey("location")) {
+            newActivity.put("location", body.getString("location"));
+        }
+        if (body.containsKey("notes")) {
+            newActivity.put("notes", body.getString("notes"));
+        }
+
+        JsonObject query = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId)
+                .put("days.dayNumber", dayNumber);
+
+        JsonObject update = new JsonObject()
+                .put("$push", new JsonObject().put("days.$.places", newActivity))
+                .put("$set", new JsonObject().put("updatedAt", System.currentTimeMillis()));
+
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                ctx.response().setStatusCode(200)
+                        .end(new JsonObject().put("message", "Activity added successfully").encode());
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip or day not found").encode());
+            }
+        });
+    }
+
+    public void updateActivity(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
+        String oldActivityName = ctx.pathParam("activityName");
+        JsonObject body = ctx.getBodyAsJson();
+
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        if (body == null || (!body.containsKey("activity") && !body.containsKey("time")
+                && !body.containsKey("location") && !body.containsKey("notes"))) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "At least one field (activity, time, location, notes) is required").encode());
+            return;
+        }
+
+        int dayNumber = Integer.parseInt(dayNumberStr);
+
+        // First, find the trip and get the current day data
+        JsonObject findQuery = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId)
+                .put("days.dayNumber", dayNumber);
+
+        mongoClient.findOne(TRIPS_COLLECTION, findQuery, null, findRes -> {
+            if (findRes.succeeded() && findRes.result() != null) {
+                JsonObject trip = findRes.result();
+                JsonArray days = trip.getJsonArray("days");
+
+                // Find the specific day and activity
+                for (int i = 0; i < days.size(); i++) {
+                    JsonObject day = days.getJsonObject(i);
+                    if (day.getInteger("dayNumber") == dayNumber) {
+                        JsonArray places = day.getJsonArray("places");
+                        for (int j = 0; j < places.size(); j++) {
+                            JsonObject place = places.getJsonObject(j);
+                            if (oldActivityName.equals(place.getString("activity"))) {
+                                // Update the activity
+                                if (body.containsKey("activity")) {
+                                    place.put("activity", body.getString("activity"));
+                                }
+                                if (body.containsKey("time")) {
+                                    place.put("time", body.getString("time"));
+                                }
+                                if (body.containsKey("location")) {
+                                    place.put("location", body.getString("location"));
+                                }
+                                if (body.containsKey("notes")) {
+                                    place.put("notes", body.getString("notes"));
+                                }
+
+                                // Update the entire day
+                                JsonObject updateQuery = new JsonObject()
+                                        .put("_id", tripId)
+                                        .put("userId", userId)
+                                        .put("days.dayNumber", dayNumber);
+
+                                JsonObject update = new JsonObject()
+                                        .put("$set", new JsonObject()
+                                                .put("days.$.places", places)
+                                                .put("updatedAt", System.currentTimeMillis()));
+
+                                mongoClient.updateCollection(TRIPS_COLLECTION, updateQuery, update, updateRes -> {
+                                    if (updateRes.succeeded()) {
+                                        ctx.response().setStatusCode(200)
+                                                .end(new JsonObject().put("message", "Activity updated successfully").encode());
+                                    } else {
+                                        ctx.response().setStatusCode(500)
+                                                .end(ErrorResponse.create(500, "Failed to update activity").encode());
+                                    }
+                                });
+                                return;
+                            }
+                        }
+                        // Activity not found
+                        ctx.response().setStatusCode(404)
+                                .end(ErrorResponse.create(404, "Activity not found").encode());
+                        return;
+                    }
+                }
+                // Day not found
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Day not found").encode());
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip not found").encode());
+            }
+        });
+    }
+
+    public void getTripById(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+
+        if (!ValidationUtils.isValidTripId(tripId)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid trip ID").encode());
+            return;
+        }
+
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
+
+        mongoClient.findOne(TRIPS_COLLECTION, query, null, result -> {
+            if (result.succeeded() && result.result() != null) {
+                ctx.response()
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject()
+                                .put("trip", result.result())
+                                .encode());
+            } else {
+                ctx.response()
+                        .setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip not found").encode());
+            }
+        });
+    }
+
+    public void reorderActivities(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
+        JsonObject body = ctx.getBodyAsJson();
+
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        if (body == null || !body.containsKey("activities")) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Activities array is required").encode());
+            return;
+        }
+
+        int dayNumber = Integer.parseInt(dayNumberStr);
+        JsonArray newActivitiesOrder = body.getJsonArray("activities");
+
+        JsonObject query = new JsonObject()
+                .put("_id", tripId)
+                .put("userId", userId)
+                .put("days.dayNumber", dayNumber);
+
+        JsonObject update = new JsonObject()
+                .put("$set", new JsonObject()
+                        .put("days.$.places", newActivitiesOrder)
+                        .put("updatedAt", System.currentTimeMillis()));
+
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                if (res.result().getDocModified() > 0) {
+                    ctx.response().setStatusCode(200)
+                            .end(new JsonObject().put("message", "Activities reordered successfully").encode());
+                } else {
+                    ctx.response().setStatusCode(404)
+                            .end(ErrorResponse.create(404, "Day not found").encode());
+                }
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip or day not found").encode());
+            }
+        });
+    }
 
     public void deleteDay(RoutingContext ctx) {
         String userId = getUserIdFromToken(ctx);
