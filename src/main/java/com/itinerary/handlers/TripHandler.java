@@ -15,6 +15,21 @@ class ErrorResponse {
     }
 }
 
+class ValidationUtils {
+    public static boolean isValidTripId(String tripId) {
+        return tripId != null && tripId.length() == 24; // MongoDB ObjectId length
+    }
+
+    public static boolean isValidDayNumber(String dayNumber) {
+        try {
+            int day = Integer.parseInt(dayNumber);
+            return day > 0 && day <= 365; // Reasonable bounds
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+}
+
 public class TripHandler {
 
     private final MongoClient mongoClient;
@@ -46,7 +61,7 @@ public class TripHandler {
             } else {
                 ctx.response()
                         .setStatusCode(500)
-                        .end(new JsonObject().put("error", "Failed to retrieve trips").encode());
+                        .end(ErrorResponse.create(500, "Failed to retrieve trips").encode());
             }
         });
     }
@@ -56,7 +71,8 @@ public class TripHandler {
         JsonObject body = ctx.getBodyAsJson();
 
         if (body == null || !body.containsKey("tripName")) {
-            ctx.response().setStatusCode(400).end(new JsonObject().put("error", "Trip name is required").encode());
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Trip name is required").encode());
             return;
         }
 
@@ -76,7 +92,8 @@ public class TripHandler {
                         .putHeader("content-type", "application/json")
                         .end(new JsonObject().put("trip", newTrip).encode());
             } else {
-                ctx.response().setStatusCode(500).end(new JsonObject().put("error", "Failed to create trip").encode());
+                ctx.response().setStatusCode(500)
+                        .end(ErrorResponse.create(500, "Failed to create trip").encode());
             }
         });
     }
@@ -85,13 +102,21 @@ public class TripHandler {
         String userId = getUserIdFromToken(ctx);
         String tripId = ctx.pathParam("tripId");
 
+        if (!ValidationUtils.isValidTripId(tripId)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid trip ID").encode());
+            return;
+        }
+
         JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
 
         mongoClient.removeDocument(TRIPS_COLLECTION, query, res -> {
             if (res.succeeded() && res.result().getRemovedCount() > 0) {
-                ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Trip deleted").encode());
+                ctx.response().setStatusCode(200)
+                        .end(new JsonObject().put("message", "Trip deleted").encode());
             } else {
-                ctx.response().setStatusCode(404).end(new JsonObject().put("error", "Trip not found").encode());
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip not found").encode());
             }
         });
     }
@@ -106,7 +131,7 @@ public class TripHandler {
         if (body == null || !body.containsKey("dayNumber") || !body.containsKey("date")
                 || !body.containsKey("places")) {
             ctx.response().setStatusCode(400)
-                    .end(new JsonObject().put("error", "dayNumber, date, and places are required").encode());
+                    .end(ErrorResponse.create(400, "dayNumber, date, and places are required").encode());
             return;
         }
 
@@ -116,12 +141,12 @@ public class TripHandler {
             JsonObject place = places.getJsonObject(i);
             if (place.getString("activity") == null || place.getString("time") == null) {
                 ctx.response().setStatusCode(400)
-                        .end(new JsonObject().put("error", "activity and time are required for each place").encode());
+                        .end(ErrorResponse.create(400, "activity and time are required for each place").encode());
                 return;
             }
         }
 
-        // FIXED: Separate query for checking if day exists vs updating
+        // Check if day already exists
         JsonObject checkQuery = new JsonObject().put("_id", tripId).put("userId", userId)
                 .put("days.dayNumber", body.getInteger("dayNumber"));
 
@@ -129,7 +154,7 @@ public class TripHandler {
             if (res.succeeded() && res.result() != null) {
                 // Day already exists
                 ctx.response().setStatusCode(400)
-                        .end(new JsonObject().put("error", "Day number already exists for this trip").encode());
+                        .end(ErrorResponse.create(400, "Day number already exists for this trip").encode());
             } else {
                 // Day doesn't exist, proceed to add it
                 JsonObject newDay = new JsonObject()
@@ -137,7 +162,6 @@ public class TripHandler {
                         .put("date", body.getString("date"))
                         .put("places", places);
 
-                // FIXED: Use a different query for the update - just match tripId and userId
                 JsonObject updateQuery = new JsonObject().put("_id", tripId).put("userId", userId);
 
                 JsonObject update = new JsonObject()
@@ -150,67 +174,107 @@ public class TripHandler {
                 mongoClient.updateCollection("trips", updateQuery, update, updateRes -> {
                     if (updateRes.succeeded()) {
                         System.out.println("Mongo update succeeded. Matched: " + updateRes.result().getDocMatched());
-                        ctx.response().setStatusCode(200).end(new JsonObject().put("message", "Day added").encode());
+                        ctx.response().setStatusCode(200)
+                                .end(new JsonObject().put("message", "Day added").encode());
                     } else {
                         System.out.println("Error during MongoDB update: " + updateRes.cause().getMessage());
-                        ctx.response().setStatusCode(500).end(new JsonObject().put("error", "Failed to add day").encode());
+                        ctx.response().setStatusCode(500)
+                                .end(ErrorResponse.create(500, "Failed to add day").encode());
                     }
                 });
             }
         });
     }
 
-    public class ValidationUtils {
-        public static boolean isValidTripId(String tripId) {
-            return tripId != null && tripId.length() == 24; // MongoDB ObjectId length
-        }
-
-        public static boolean isValidDayNumber(String dayNumber) {
-            try {
-                int day = Integer.parseInt(dayNumber);
-                return day > 0 && day <= 365; // Reasonable bounds
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-    }
-
-    public void deleteActivity(RoutingContext ctx) {
+    public void deleteDay(RoutingContext ctx) {
         String userId = getUserIdFromToken(ctx);
         String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
 
-        if (!ValidationUtils.isValidDayNumber(ctx.pathParam("dayNumber"))) {
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
             ctx.response().setStatusCode(400)
                     .end(ErrorResponse.create(400, "Invalid day number").encode());
             return;
         }
 
-        Integer dayNumber = Integer.valueOf(ctx.pathParam("dayNumber"));
-        String activityToRemove = ctx.pathParam("activityName");
+        int dayNumber = Integer.parseInt(dayNumberStr);
 
-        JsonObject query = new JsonObject()
-                .put("_id", tripId)
-                .put("userId", userId);
+        JsonObject query = new JsonObject().put("_id", tripId).put("userId", userId);
 
         JsonObject update = new JsonObject()
-                .put("$pull", new JsonObject()
-                        .put("days.$.places", new JsonObject()
-                                .put("activity", activityToRemove)));
+                .put("$pull", new JsonObject().put("days", new JsonObject().put("dayNumber", dayNumber)))
+                .put("$set", new JsonObject().put("updatedAt", System.currentTimeMillis()));
 
-        // First find the document to get array index
+        mongoClient.updateCollection(TRIPS_COLLECTION, query, update, res -> {
+            if (res.succeeded() && res.result().getDocMatched() > 0) {
+                if (res.result().getDocModified() > 0) {
+                    ctx.response().setStatusCode(200)
+                            .end(new JsonObject().put("message", "Day deleted").encode());
+                } else {
+                    ctx.response().setStatusCode(404)
+                            .end(ErrorResponse.create(404, "Day not found").encode());
+                }
+            } else {
+                ctx.response().setStatusCode(404)
+                        .end(ErrorResponse.create(404, "Trip not found").encode());
+            }
+        });
+    }
+
+    public void deleteActivity(RoutingContext ctx) {
+        String userId = getUserIdFromToken(ctx);
+        String tripId = ctx.pathParam("tripId");
+        String dayNumberStr = ctx.pathParam("dayNumber");
+        String activityToRemove = ctx.pathParam("activityName");
+
+        if (!ValidationUtils.isValidDayNumber(dayNumberStr)) {
+            ctx.response().setStatusCode(400)
+                    .end(ErrorResponse.create(400, "Invalid day number").encode());
+            return;
+        }
+
+        int dayNumber = Integer.parseInt(dayNumberStr);
+
+        System.out.println("Deleting activity: " + activityToRemove + " from day " + dayNumber + " in trip " + tripId);
+
+        // First, find the trip and verify it exists with the specific day
         JsonObject findQuery = new JsonObject()
                 .put("_id", tripId)
                 .put("userId", userId)
                 .put("days.dayNumber", dayNumber);
 
-        mongoClient.findOne(TRIPS_COLLECTION, findQuery, null, res -> {
-            if (res.succeeded() && res.result() != null) {
-                // Now update using positional operator
-                mongoClient.updateCollection(TRIPS_COLLECTION, findQuery, update, updateRes -> {
+        mongoClient.findOne(TRIPS_COLLECTION, findQuery, null, findRes -> {
+            if (findRes.succeeded() && findRes.result() != null) {
+                // Trip and day exist, now remove the activity
+                JsonObject updateQuery = new JsonObject()
+                        .put("_id", tripId)
+                        .put("userId", userId)
+                        .put("days.dayNumber", dayNumber);
+
+                JsonObject update = new JsonObject()
+                        .put("$pull", new JsonObject()
+                                .put("days.$.places", new JsonObject()
+                                        .put("activity", activityToRemove)))
+                        .put("$set", new JsonObject()
+                                .put("updatedAt", System.currentTimeMillis()));
+
+                System.out.println("Update query: " + updateQuery.encodePrettily());
+                System.out.println("Update operation: " + update.encodePrettily());
+
+                mongoClient.updateCollection(TRIPS_COLLECTION, updateQuery, update, updateRes -> {
                     if (updateRes.succeeded()) {
-                        ctx.response().setStatusCode(200)
-                                .end(new JsonObject().put("message", "Activity removed").encode());
+                        System.out.println("Activity deletion - Matched: " + updateRes.result().getDocMatched() +
+                                ", Modified: " + updateRes.result().getDocModified());
+
+                        if (updateRes.result().getDocModified() > 0) {
+                            ctx.response().setStatusCode(200)
+                                    .end(new JsonObject().put("message", "Activity removed").encode());
+                        } else {
+                            ctx.response().setStatusCode(404)
+                                    .end(ErrorResponse.create(404, "Activity not found").encode());
+                        }
                     } else {
+                        System.out.println("Error during activity deletion: " + updateRes.cause().getMessage());
                         ctx.response().setStatusCode(500)
                                 .end(ErrorResponse.create(500, "Failed to remove activity").encode());
                     }
